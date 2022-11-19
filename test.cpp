@@ -10,27 +10,35 @@ C code : test.cpp
 #include "RCSwitch.h"
 #include "RcOok.h"
 #include "Sensor.h"
+#include <iostream>
+#include <stdexcept>
+
+std::string exec(const char* cmd) {
+    char buffer[128];
+    std::string result = "";
+    FILE* pipe = popen(cmd, "r");
+    if (!pipe) throw std::runtime_error("popen() failed!");
+    try {
+        while (fgets(buffer, sizeof buffer, pipe) != NULL) {
+            result += buffer;
+        }
+    } catch (...) {
+        pclose(pipe);
+        throw;
+    }
+    pclose(pipe);
+    return result;
+}
 
 int main(int argc, char *argv[])
 {
 	int RXPIN = 1;
 	int TXPIN = 0;
-        int loggingok;   // Global var indicating logging on or off
-        FILE *fp;        // Global var file handle
-        
-        if(argc==2) {
-          fp = fopen(argv[1], "a"); // Log file opened in append mode to avoid destroying data
-          loggingok=1;
-          if (fp == NULL) {
-              perror("Failed to open log file!"); // Exit if file open fails
-              exit(EXIT_FAILURE);
-          }
-        } else {
-          loggingok=0;
-        }
 
 	if(wiringPiSetup() == -1)
+	{
 		return 0;
+	}
 
 	RCSwitch *rc = new RCSwitch(RXPIN,TXPIN);
 
@@ -41,22 +49,24 @@ int main(int argc, char *argv[])
 			char message[100];
 
 			rc->getOokCode(message);
-			printf("%s\n",message);
 
 			Sensor *s = Sensor::getRightSensor(message);
 			if (s!= NULL)
 			{
-				printf("Temp : %f\n",s->getTemperature());
-				printf("Humidity : %f\n",s->getHumidity());
-				printf("Channel : %d\n",s->getChannel());
-                                if((loggingok) && (s->getChannel()>0)) {
-                                        fprintf(fp,"%d,temp%f,hum%f\n",s->getChannel(),s->getTemperature(),s->getHumidity());
-                                        fflush(fp);
-                                        fflush(stdout);
-                                }
-			}
+				if((argc>=2) && (s->getChannel()>0)) {
+					char command[1000];
+					snprintf(command, sizeof(command), "%spost.sh %d %f %f %d", argv[1], s->getChannel(), s->getTemperature(), s->getHumidity(), s->isBatteryLow());
+					exec(command);
+				}
+
+				if((argc==3) && (s->getChannel()>0)) {
+					printf("Temp : %f\n",s->getTemperature());
+					printf("Humidity : %f\n",s->getHumidity());
+					printf("Channel : %d\n",s->getChannel());
+				}
+}
 			delete s;
 		}
-		delay(1000);
+		delay(100);
 	}
 }
